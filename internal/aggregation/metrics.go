@@ -93,8 +93,8 @@ func (ms *MetricSnapshot) GetMetric(m *Metric) {
 		return metric
 	}
 
-	metric := NewMetric(name, metricType)
-	ms.Metrics[name] = metric
+	metric := NewMetric(Name, MetricType)
+	ms.Metrics[Name] = metric
 	return metric
 
 }
@@ -147,7 +147,7 @@ func NewTimeWindow(startTime time.Time, duration time.Duration) *TimeWindow {
 		StartTime: startTime,
 		EndTime:   startTime.Add(duration),
 		Duration:  duration,
-		Metrics:   NewMetricsSnapshot(),
+		Metrics:   NewMetricSnapshot(),
 		Closed:    false,
 	}
 }
@@ -227,14 +227,14 @@ func (wm *WindowManager) Cleanup(keepDuration time.Duration) {
 	now := time.Now()
 	activeWindows := make([]*TimeWindow, 0)
 
-	for _, window := range wm.windows {
+	for _, window := range wm.Windows {
 		// Garder si pas fermée ou fermée récemment
 		if !window.Closed || now.Sub(window.EndTime) < keepDuration {
 			activeWindows = append(activeWindows, window)
 		}
 	}
 
-	wm.windows = activeWindows
+	wm.Windows = activeWindows
 }
 
 // GetActiveWindows retourne toutes les fenêtres actives
@@ -243,7 +243,7 @@ func (wm *WindowManager) GetActiveWindows() []*TimeWindow {
 	defer wm.mu.RUnlock()
 
 	active := make([]*TimeWindow, 0)
-	for _, window := range wm.windows {
+	for _, window := range wm.Windows {
 		if !window.Closed {
 			active = append(active, window)
 		}
