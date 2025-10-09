@@ -10,8 +10,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Rassimdou/Real-time-Analytics/internal/aggregation"
 	"github.com/Rassimdou/Real-time-Analytics/internal/config"
 	"github.com/Rassimdou/Real-time-Analytics/internal/server"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -44,6 +46,29 @@ func main() {
 	// Create event queue (buffered channel)
 	eventQueue := make(chan server.Event, cfg.Processing.BufferSize)
 
+	// Create aggregator
+	agg := aggregation.NewAggregator(
+		1*time.Minute,  // Window duration: 1 minute
+		10*time.Second, // Flush interval: 10 seconds
+		logger,
+	)
+
+	// Set callback pour fenêtres fermées
+	agg.SetWindowClosedCallback(func(window *aggregation.TimeWindow) {
+		logger.Info("window closed",
+			zap.Time("start", window.StartTime),
+			zap.Time("end", window.EndTime),
+			zap.Int("events", int(window.Metrics.GetAllMetrics()["events"].Count)),
+		)
+		// TODO: Sauvegarder dans PostgreSQL/Redis
+	})
+
+	// Create context for aggregator and workers
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Start aggregator
+	go agg.Start(ctx)
+
 	// Determine Gin mode based on log level
 	ginMode := "release"
 	if cfg.Logging.Level == "debug" {
@@ -51,17 +76,16 @@ func main() {
 	}
 
 	// Create HTTP server
-	srv := server.NewServer(cfg.GetServerAddress(), logger, eventQueue, ginMode)
+	srv := server.NewServer(cfg.GetServerAddress(), logger, eventQueue, agg, ginMode)
 
 	// Start worker pool to process events
 	var wg sync.WaitGroup
-	ctx, cancel := context.WithCancel(context.Background())
 
 	for i := 0; i < cfg.Processing.WorkerCount; i++ {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			processEvents(ctx, workerID, eventQueue, logger)
+			processEvents(ctx, workerID, eventQueue, agg, logger)
 		}(i)
 	}
 
@@ -149,7 +173,7 @@ func setupLogger(level string, format string) (*zap.Logger, error) {
 }
 
 // processEvents is a worker function that processes events from the queue
-func processEvents(ctx context.Context, workerID int, eventQueue <-chan server.Event, logger *zap.Logger) {
+func processEvents(ctx context.Context, workerID int, eventQueue <-chan server.Event, agg *aggregation.Aggregator, logger *zap.Logger) {
 	logger.Info("worker started", zap.Int("worker_id", workerID))
 
 	processed := 0
@@ -166,12 +190,22 @@ func processEvents(ctx context.Context, workerID int, eventQueue <-chan server.E
 			return
 
 		case event := <-eventQueue:
-			// Process the event
-			// TODO: Add actual processing logic (aggregation, storage, etc.)
+			// Convertir server.Event en aggregation.Event
+			aggEvent := aggregation.Event{
+				ID:         event.ID,
+				Type:       event.Type,
+				Timestamp:  event.Timestamp,
+				UserID:     event.UserID,
+				SessionID:  event.SessionID,
+				Properties: event.Properties,
+			}
+
+			// Traiter l'événement via l'aggregator
+			agg.ProcessEvent(aggEvent)
 
 			processed++
 
-			// Log event details (for now)
+			// Log event details
 			logger.Debug("processing event",
 				zap.Int("worker_id", workerID),
 				zap.String("event_id", event.ID),
