@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Rassimdou/Real-time-Analytics/internal/aggregation"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -16,6 +17,7 @@ type Server struct {
 	httpServer *http.Server
 	logger     *zap.Logger
 	eventQueue chan Event
+	aggregator *aggregation.Aggregator
 }
 
 // Event represents an analytics event
@@ -23,8 +25,8 @@ type Event struct {
 	ID         string                 `json:"id"`
 	Type       string                 `json:"type" binding:"required"`
 	Timestamp  time.Time              `json:"timestamp"`
-	UserID     string                 `json:"user_id" `
-	SessionID  string                 `json:"session_id" `
+	UserID     string                 `json:"user_id"`
+	SessionID  string                 `json:"session_id"`
 	Properties map[string]interface{} `json:"properties"`
 }
 
@@ -40,7 +42,7 @@ type SuccessResponse struct {
 }
 
 // NewServer creates a new server instance
-func NewServer(addr string, logger *zap.Logger, eventQueue chan Event, mode string) *Server {
+func NewServer(addr string, logger *zap.Logger, eventQueue chan Event, aggregator *aggregation.Aggregator, mode string) *Server {
 	// set GIN mode (debug, release, test)
 	gin.SetMode(mode)
 
@@ -48,6 +50,7 @@ func NewServer(addr string, logger *zap.Logger, eventQueue chan Event, mode stri
 		engine:     gin.New(),
 		logger:     logger,
 		eventQueue: eventQueue,
+		aggregator: aggregator,
 	}
 	s.setupMiddleware()
 	s.setupRoutes()
@@ -94,8 +97,9 @@ func (s *Server) setupRoutes() {
 		v1.POST("/events/batch", s.handleBatchEvents)
 
 		//Metrics (placeholder for future)
-		v1.GET("/metrics", s.handleGetMetrics)
+		v1.GET("/metrics", s.handleGetAllMetrics)
 		v1.GET("/metrics/:name", s.handleGetMetricByName)
+		v1.GET("/stats", s.handleGetStats)
 	}
 }
 
@@ -277,35 +281,106 @@ func (s *Server) handleBatchEvents(c *gin.Context) {
 }
 
 // handleGetMetrics handles metrics retrieval (placeholder)
-func (s *Server) handleGetMetrics(c *gin.Context) {
-	//query params
-	start := c.DefaultQuery("start", "")
-	end := c.DefaultQuery("end", "")
-	interval := c.DefaultQuery("interval", "1m")
+// handleGetAllMetrics retourne TOUTES les métriques
+func (s *Server) handleGetAllMetrics(c *gin.Context) {
+	if s.aggregator == nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error:   true,
+			Message: "aggregator not initialized",
+		})
+		return
+	}
+
+	// Récupérer toutes les métriques depuis l'aggregator
+	metrics := s.aggregator.GetGlobalMetrics()
+
+	if len(metrics) == 0 {
+		c.JSON(http.StatusOK, SuccessResponse{
+			Status:  "success",
+			Message: "no metrics yet",
+			Data: gin.H{
+				"metrics": []string{},
+			},
+		})
+		return
+	}
+
+	s.logger.Debug("returning all metrics",
+		zap.Int("count", len(metrics)),
+	)
 
 	c.JSON(http.StatusOK, SuccessResponse{
 		Status:  "success",
-		Message: "metrics endpoint - implementing coming soon",
+		Message: fmt.Sprintf("retrieved %d metrics", len(metrics)),
+		Data:    metrics,
+	})
+}
+
+// handleGetMetricByName retourne une métrique spécifique
+func (s *Server) handleGetMetricByName(c *gin.Context) {
+	if s.aggregator == nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error:   true,
+			Message: "aggregator not initialized",
+		})
+		return
+	}
+
+	metricName := c.Param("name")
+
+	// Récupérer toutes les métriques
+	allMetrics := s.aggregator.GetGlobalMetrics()
+
+	// Chercher la métrique demandée
+	metric, exists := allMetrics[metricName]
+	if !exists {
+		c.JSON(http.StatusNotFound, ErrorResponse{
+			Error:   true,
+			Message: fmt.Sprintf("metric '%s' not found", metricName),
+		})
+		return
+	}
+
+	s.logger.Debug("returning metric",
+		zap.String("metric_name", metricName),
+		zap.Float64("value", metric.Value),
+		zap.Int64("count", metric.Count),
+	)
+
+	c.JSON(http.StatusOK, SuccessResponse{
+		Status:  "success",
+		Message: fmt.Sprintf("metric '%s' found", metricName),
 		Data: gin.H{
-			"start":    start,
-			"end":      end,
-			"interval": interval,
-			"metrics":  []string{},
+			"name":      metric.Name,
+			"type":      metric.Type,
+			"value":     metric.Value,
+			"count":     metric.Count,
+			"timestamp": metric.Timestamp,
 		},
 	})
 }
 
-// handleGetMetricByName handles specific metric query
-func (s *Server) handleGetMetricByName(c *gin.Context) {
-	metricName := c.Param("name")
+// handleGetStats retourne les statistiques de l'aggregator
+func (s *Server) handleGetStats(c *gin.Context) {
+	if s.aggregator == nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error:   true,
+			Message: "aggregator not initialized",
+		})
+		return
+	}
+
+	// Récupérer les stats
+	stats := s.aggregator.GetStats()
+
+	s.logger.Info("returning aggregator stats",
+		zap.Any("stats", stats),
+	)
 
 	c.JSON(http.StatusOK, SuccessResponse{
 		Status:  "success",
-		Message: fmt.Sprintf("metric %s - implementation coming soon", metricName),
-		Data: gin.H{
-			"metric": metricName,
-			"data":   []interface{}{},
-		},
+		Message: "aggregator statistics",
+		Data:    stats,
 	})
 }
 
