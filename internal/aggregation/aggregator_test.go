@@ -5,17 +5,18 @@ import (
 	"math"
 	"testing"
 	"time"
+
 	"go.uber.org/zap"
 )
 
 // TestMetricIncrement teste l'incrémentation d'un compteur
 func TestMetricIncrement(t *testing.T) {
-    metric := NewMetric(fmt.Sprintf("test_metric_%d", time.Now().UnixNano()), MetricTypeCounter)
+	metric := NewMetric(fmt.Sprintf("test_metric_%d", time.Now().UnixNano()), MetricTypeCounter)
 
-    // Incrémenter 10 fois
-    for i := 0; i < 10; i++ {
-        metric.Increment()
-    }
+	// Incrémenter 10 fois
+	for i := 0; i < 10; i++ {
+		metric.Increment()
+	}
 
 	// Vérifications
 	if metric.Count != 10 {

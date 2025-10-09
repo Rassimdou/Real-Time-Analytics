@@ -23,6 +23,7 @@ type Metric struct {
     Tags      map[string]string   `json:"tags,omitempty"`
     Values    []float64           `json:"values,omitempty"` // pour histogramme
     UniqueSet map[string]struct{} `json:"-"`                // pour set
+    mu        sync.RWMutex                                 // protège les champs ci-dessus
 }
 
   // NewMetric crée une nouvelle métrique
@@ -38,6 +39,8 @@ type Metric struct {
 }
   // Increment augmente une métrique compteur de 1
   func (m *Metric) Increment() {
+    m.mu.Lock()
+    defer m.mu.Unlock()
     m.Count++
     m.Value += 1
     m.Timestamp = time.Now()
@@ -46,6 +49,8 @@ type Metric struct {
   // IncrementBy augmente une métrique compteur d'une valeur donnée
   func (m *Metric) IncrementBy(value float64) {
 	// Pour un comptreur numérique, on additionne la valeur
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.Value += value
 	m.Count++
 	m.Timestamp = time.Now()
@@ -53,51 +58,59 @@ type Metric struct {
 
 // Set définit une valeur pour une gauge
 func (m *Metric) Set(value float64) {
-	m.Value = value
-	m.Timestamp = time.Now()
+    m.mu.Lock()
+    defer m.mu.Unlock()
+    m.Value = value
+    m.Timestamp = time.Now()
 }
 
 // Observe ajoute une valeur à un histogramme
 func (m *Metric) Observe(value float64) {
-	m.Values = append(m.Values, value)
-	m.Count++
-	m.Value += value
-	m.Timestamp = time.Now()
+    m.mu.Lock()
+    defer m.mu.Unlock()
+    m.Values = append(m.Values, value)
+    m.Count++
+    m.Value += value
+    m.Timestamp = time.Now()
 }
 
 // add unique value to a set
 func (m *Metric) AddUnique(value string) {
-	m.UniqueSet[value] = struct{}{}
-	m.Count = int64(len(m.UniqueSet))
-	m.Timestamp = time.Now()
+    m.mu.Lock()
+    defer m.mu.Unlock()
+    m.UniqueSet[value] = struct{}{}
+    m.Count = int64(len(m.UniqueSet))
+    m.Timestamp = time.Now()
 }
 
 func (m *Metric) Average() float64 {
-	if m.Count == 0 {
-		return 0
-	}
-	return m.Value / float64(m.Count)
+    m.mu.RLock()
+    defer m.mu.RUnlock()
+    if m.Count == 0 {
+        return 0
+    }
+    return m.Value / float64(m.Count)
 }
 
 // MetricsSnapshot represente un ensemble de métriques à un instant donné
 type MetricsSnapshot struct {
-	Metrics   map[string]*Metric `json:"metrics"`
-	Timestamp time.Time          `json:"timestamp"`
-	mu        sync.RWMutex
+    Metrics   map[string]*Metric `json:"metrics"`
+    Timestamp time.Time          `json:"timestamp"`
+    mu        sync.RWMutex
 }
 
 func NewMetricsSnapshot() *MetricsSnapshot {
-	return &MetricsSnapshot{
-		Timestamp: time.Now(),
-		Metrics:   make(map[string]*Metric),
-	}
+    return &MetricsSnapshot{
+        Timestamp: time.Now(),
+        Metrics:   make(map[string]*Metric),
+    }
 }
 
 // GetMetric récupère ou crée une métrique par nom et type
 func (ms *MetricsSnapshot) GetMetric(name string, metricType MetricType) *Metric {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
-
+ 
 	if metric, exists := ms.Metrics[name]; exists {
 		return metric
 	}
@@ -131,20 +144,20 @@ func (ms *MetricsSnapshot) GetAllMetrics() map[string]*Metric {
 }
 
 func (ms *MetricsSnapshot) Reset() {
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
+    ms.mu.Lock()
+    defer ms.mu.Unlock()
  
-	ms.Metrics = make(map[string]*Metric)
-	ms.Timestamp = time.Now()
+    ms.Metrics = make(map[string]*Metric)
+    ms.Timestamp = time.Now()
 }
 
 // TimeWindow represente une fenetre de temps pour l'agrégation des métriques
 type TimeWindow struct {
-	StartTime time.Time      `json:"start_time"`
-	EndTime  time.Time       `json:"end_time"`
-	Duration time.Duration   `json:"duration"`
-	Metrics  *MetricsSnapshot `json:"metrics"`
-	Closed   bool            `json:"closed"`
+    StartTime time.Time      `json:"start_time"`
+    EndTime  time.Time      `json:"end_time"`
+    Duration time.Duration   `json:"duration"`
+    Metrics  *MetricsSnapshot `json:"metrics"`
+    Closed   bool            `json:"closed"`
 }
 
 // NewTimeWindow crée une nouvelle fenêtre de temps
