@@ -151,11 +151,5 @@ func (ps *PostegresStorage) InsertEventsBatch(ctx context.Context, events []Stor
 func (ps *PostegresStorage) SaveWindowMetrics(ctx context.Context, metrics WindowMetrics) error {
 	query := `
 		INSERT INTO closed_windows (start_time, end_time, window_duration, total_events, event_types, unique_users, unique_sessions, metrics_data)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		`
-
-	eventTypesJSON, _ := json.Marshal(metrics.EventTypes)
-	metricsDataJSON, _ := json.Marshal(metrics.AllMetrics)
-
-	duration := metrics.EndTime.Sub(metrics.StartTime)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 }
